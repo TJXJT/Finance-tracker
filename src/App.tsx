@@ -1,4 +1,3 @@
-// src/App.tsx
 import { useState, useEffect } from "react";
 import { supabase } from "./supabaseClient";
 
@@ -11,6 +10,7 @@ import "./styles.css";
 
 export type Transaction = {
   id: string;
+  user_id: string;
   date: string;
   category: "Dad" | "Mom" | "Vavy" | "Juni" | "Lael";
   description: string;
@@ -18,22 +18,19 @@ export type Transaction = {
   type: "income" | "expense";
   notes?: string;
   location?: string;
-  image_url?: string;
   created_at?: string;
   updated_at?: string;
 };
 
 export default function App() {
-  const [user, setUser] = useState<string | null>(null);
+  const [user, setUser] = useState<{ id: string; email: string } | null>(null);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [showSidebar, setShowSidebar] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  // --- Fixed categories ---
   const categories: Transaction["category"][] = ["Dad", "Mom", "Vavy", "Juni", "Lael"];
 
-  // --- Filters & Sorting ---
   const [filterType, setFilterType] = useState<"all" | "income" | "expense">("all");
   const [filterCategory, setFilterCategory] = useState<"all" | Transaction["category"]>("all");
   const [startDate, setStartDate] = useState<string>("");
@@ -41,7 +38,26 @@ export default function App() {
   const [sortField, setSortField] = useState<"date" | "amount">("date");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
 
-  // --- Fetch transactions ---
+  // --- Fetch current Supabase user on load ---
+  useEffect(() => {
+    const getUser = async () => {
+      const { data } = await supabase.auth.getUser();
+      if (data.user) setUser({ id: data.user.id, email: data.user.email! });
+    };
+    getUser();
+
+    // Listen to auth changes
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session?.user) setUser({ id: session.user.id, email: session.user.email! });
+      else setUser(null);
+    });
+
+    return () => {
+      listener.subscription.unsubscribe();
+    };
+  }, []);
+
+  // --- Fetch user transactions ---
   const fetchTransactions = async () => {
     if (!user) return;
     setLoading(true);
@@ -49,6 +65,7 @@ export default function App() {
     const { data, error } = await supabase
       .from<Transaction>("transactions")
       .select("*")
+      .eq("user_id", user.id)
       .order(sortField, { ascending: sortOrder === "asc" });
 
     if (error) console.error("Fetch error:", error);
@@ -61,37 +78,33 @@ export default function App() {
     if (user) fetchTransactions();
   }, [user, sortField, sortOrder]);
 
-  // --- Delete transaction ---
   const handleDelete = async (id: string) => {
     if (!confirm("Are you sure you want to delete this transaction?")) return;
-
     const { error } = await supabase.from("transactions").delete().eq("id", id);
     if (error) console.error("Delete error:", error);
     else fetchTransactions();
   };
 
-  // --- Summary calculations ---
-  const totalIncome = transactions
-    .filter((t) => t.type === "income")
-    .reduce((sum, t) => sum + t.amount, 0);
-  const totalExpense = transactions
-    .filter((t) => t.type === "expense")
-    .reduce((sum, t) => sum + t.amount, 0);
+  const totalIncome = transactions.filter(t => t.type === "income").reduce((sum, t) => sum + t.amount, 0);
+  const totalExpense = transactions.filter(t => t.type === "expense").reduce((sum, t) => sum + t.amount, 0);
   const balance = totalIncome - totalExpense;
 
-  // --- Filtered & sorted transactions ---
   const displayedTransactions = [...transactions]
-    .filter((t) => filterType === "all" || t.type === filterType)
-    .filter((t) => filterCategory === "all" || t.category === filterCategory)
-    .filter((t) => !startDate || t.date >= startDate)
-    .filter((t) => !endDate || t.date <= endDate)
+    .filter(t => filterType === "all" || t.type === filterType)
+    .filter(t => filterCategory === "all" || t.category === filterCategory)
+    .filter(t => !startDate || t.date >= startDate)
+    .filter(t => !endDate || t.date <= endDate)
     .sort((a, b) => {
-      if (sortField === "date")
-        return sortOrder === "asc" ? a.date.localeCompare(b.date) : b.date.localeCompare(a.date);
+      if (sortField === "date") return sortOrder === "asc" ? a.date.localeCompare(b.date) : b.date.localeCompare(a.date);
       return sortOrder === "asc" ? a.amount - b.amount : b.amount - a.amount;
     });
 
-  if (!user) return <Login onLogin={setUser} />;
+  if (!user) return <Login onLogin={(id) => setUser({ id, email: "" })} />;
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    setUser(null);
+  };
 
   return (
     <div className="app-container">
@@ -121,13 +134,11 @@ export default function App() {
         <button onClick={() => setShowSidebar(!showSidebar)}>
           {showSidebar ? "Hide Filters" : "Show Filters"}
         </button>
-        <button className="logout-btn" onClick={() => setUser(null)}>
-          Logout
-        </button>
+        <button className="logout-btn" onClick={handleLogout}>Logout</button>
       </div>
 
       {/* Transaction Form */}
-      {showForm && <TransactionForm categories={categories} onAdd={fetchTransactions} />}
+      {showForm && <TransactionForm userId={user.id} categories={categories} onAdd={fetchTransactions} />}
 
       {/* Sidebar */}
       {showSidebar && (
@@ -151,7 +162,6 @@ export default function App() {
       {/* Transactions Table */}
       <div className="transactions-section">
         <h2>Transactions</h2>
-
         {loading ? (
           <p>Loading...</p>
         ) : displayedTransactions.length === 0 ? (
@@ -181,9 +191,7 @@ export default function App() {
                   <td>{t.notes || ""}</td>
                   <td>{t.location || ""}</td>
                   <td style={{ textAlign: "center" }}>
-                    <button className="delete-btn" onClick={() => handleDelete(t.id)}>
-                      Delete
-                    </button>
+                    <button className="delete-btn" onClick={() => handleDelete(t.id)}>Delete</button>
                   </td>
                 </tr>
               ))}
@@ -192,7 +200,6 @@ export default function App() {
         )}
       </div>
 
-      {/* Category Totals */}
       <CategoryTotals transactions={transactions} />
     </div>
   );

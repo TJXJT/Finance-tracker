@@ -1,14 +1,14 @@
-// src/components/TransactionForm.tsx
 import { useState } from "react";
 import { supabase } from "../supabaseClient";
 import { Transaction } from "../types";
 
 type Props = {
+  userId: string;
   categories: Transaction["category"][];
   onAdd: () => void;
 };
 
-export default function TransactionForm({ categories, onAdd }: Props) {
+export default function TransactionForm({ userId, categories, onAdd }: Props) {
   const today = new Date().toISOString().split("T")[0];
 
   const [date, setDate] = useState(today);
@@ -26,6 +26,7 @@ export default function TransactionForm({ categories, onAdd }: Props) {
     if (!date || !category || amount <= 0) return;
 
     const newTransaction: Omit<Transaction, "id"> = {
+      user_id: userId,
       date,
       category,
       description,
@@ -35,12 +36,11 @@ export default function TransactionForm({ categories, onAdd }: Props) {
       location,
     };
 
-    const { data, error } = await supabase.from<Transaction>("transactions").insert([newTransaction]);
+    const { error } = await supabase.from<Transaction>("transactions").insert([newTransaction]);
     if (error) {
       console.error("Error adding transaction:", error);
     } else {
       onAdd();
-      // Reset form
       setDate(today);
       setCategory(categories[0]);
       setDescription("");
@@ -61,9 +61,7 @@ export default function TransactionForm({ categories, onAdd }: Props) {
       <div>
         <label>Category:</label>
         <select value={category} onChange={e => setCategory(e.target.value as Transaction["category"])}>
-          {categories.map(cat => (
-            <option key={cat} value={cat}>{cat}</option>
-          ))}
+          {categories.map(cat => <option key={cat} value={cat}>{cat}</option>)}
         </select>
       </div>
 
@@ -77,14 +75,7 @@ export default function TransactionForm({ categories, onAdd }: Props) {
         <input type="number" value={amount} onChange={e => setAmount(Number(e.target.value))} required />
         <div style={{ marginTop: "0.3rem" }}>
           {quickAmounts.map(a => (
-            <button
-              key={a}
-              type="button"
-              onClick={() => setAmount(a)}
-              style={{ marginRight: "0.3rem" }}
-            >
-              ${a}
-            </button>
+            <button key={a} type="button" onClick={() => setAmount(a)} style={{ marginRight: "0.3rem" }}>${a}</button>
           ))}
         </div>
       </div>
